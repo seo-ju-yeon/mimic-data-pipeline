@@ -5,7 +5,7 @@ from pathlib import Path
 from urllib.request import urlopen
 from collections import Counter
 from datetime import date, datetime
-from db import connect_mariadb, save_patients, save_admissions
+from db import connect_mariadb, save_dataset
 
 def convert_patient(patient):
     """환자 한 행의 숫자, 날짜 자료형을 변환함. 빈 사망일은 None으로 처리함."""
@@ -451,12 +451,10 @@ print(
     )),
 )
 
-# 24. 변환한 환자 데이터를 MariaDB에 저장하고 비교
+# 24. 환자와 입원을 하나의 트랜잭션으로 저장하고 비교
 connection = connect_mariadb()
 
 try:
-    # typed_patients를 전달하므로 정수,날짜,None으로 변환한 값이 DB로 들어감
-    save_patients(connection, typed_patients)
-    save_admissions(connection, typed_admissions)
+    save_dataset(connection, typed_patients, typed_admissions)
 finally:
     connection.close()

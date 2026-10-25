@@ -59,8 +59,9 @@ def connect_postgres():
         options="-c search_path=public",
     )
 
-def save_patients(connection, patients):
-    """환자를 저장하고 조회 결과가 입력과 일치할 때만 커밋한다."""
+
+def save_patients(connection, patients, manage_transaction=True):
+    """환자를 저장·비교한다. 옵션에 따라 트랜잭션도 직접 관리한다."""
     if not patients:
         raise ValueError("저장할 환자 데이터가 없습니다.")
 
@@ -93,9 +94,12 @@ def save_patients(connection, patients):
             cursor.execute(select_sql)
             existing_rows = cursor.fetchall()
 
+            # 이미 같은 데이터가 있으면 추가 INSERT 하지 않음
             if existing_rows:
                 if existing_rows == expected_rows:
-                    connection.rollback()
+                    if manage_transaction:
+                        connection.rollback()
+
                     print("환자 데이터가 이미 동일하게 저장되어 있습니다.")
                     return 0
 
@@ -105,23 +109,27 @@ def save_patients(connection, patients):
 
             cursor.executemany(insert_sql, expected_rows)
 
+            # 커밋하기 전에 같은 연결에서 저장 결과를 확인함
             cursor.execute(select_sql)
-            actual_rows = cursor.fetchall()
+            actual_rows = list(cursor.fetchall())
 
             if actual_rows != expected_rows:
                 raise ValueError("저장 후 조회한 환자 데이터가 입력과 다릅니다.")
 
-        connection.commit()
+        if manage_transaction:
+            connection.commit()
+
         print(f"환자 {len(actual_rows)}행 저장 및 값 비교 통과")
         return len(actual_rows)
 
     except Exception:
-        connection.rollback()
+        if manage_transaction:
+            connection.rollback()
         raise
 
 
-def save_admissions(connection, admissions):
-    """입원을 저장하고 조회 결과가 입력과 일치할 때만 커밋한다."""
+def save_admissions(connection, admissions, manage_transaction=True):
+    """입원을 저장·비교한다. 옵션에 따라 트랜잭션도 직접 관리한다."""
     if not admissions:
         raise ValueError("저장할 입원 데이터가 없습니다.")
 
@@ -162,9 +170,12 @@ def save_admissions(connection, admissions):
             cursor.execute(select_sql)
             existing_rows = cursor.fetchall()
 
+            # 이미 같은 데이터가 있으면 추가 INSERT를 하지 않음
             if existing_rows:
                 if existing_rows == expected_rows:
-                    connection.rollback()
+                    if manage_transaction:
+                        connection.rollback()
+
                     print("입원 데이터가 이미 동일하게 저장되어 있습니다.")
                     return 0
 
@@ -174,18 +185,22 @@ def save_admissions(connection, admissions):
 
             cursor.executemany(insert_sql, expected_rows)
 
+            # 커밋하기 전에 같은 연결에서 저장 결과를 확인함
             cursor.execute(select_sql)
-            actual_rows = cursor.fetchall()
+            actual_rows = list(cursor.fetchall())
 
             if actual_rows != expected_rows:
                 raise ValueError("저장 후 조회한 입원 데이터가 입력과 다릅니다.")
 
-        connection.commit()
+        if manage_transaction:
+            connection.commit()
+
         print(f"입원 {len(actual_rows)}행 저장 및 값 비교 통과")
         return len(actual_rows)
 
     except Exception:
-        connection.rollback()
+        if manage_transaction:
+            connection.rollback()
         raise
 
 
@@ -221,6 +236,46 @@ def read_tables(connection):
         "admissions": admissions,
     }
 
+# 전체 작업의 커밋, 롤백을 담당함
+def save_dataset(connection, patients, admissions):
+    """두 테이블을 저장·검증하고 하나의 트랜잭션으로 확정한다."""
+    try:
+        expected_data = {
+            "patients": sorted(
+                patients,
+                key=lambda row: row["subject_id"],
+            ),
+            "admissions": sorted(
+                admissions,
+                key=lambda row: row["hadm_id"],
+            ),
+        }
+
+        save_patients(
+            connection,
+            expected_data["patients"],
+            manage_transaction=False,
+        )
+        save_admissions(
+            connection,
+            expected_data["admissions"],
+            manage_transaction=False,
+        )
+
+        actual_data = read_tables(connection)
+
+        if actual_data != expected_data:
+            raise ValueError("두 테이블의 전체 조회 결과가 입력과 다릅니다.")
+
+        connection.commit()
+        print("두 테이블 전체 비교 통과 및 트랜잭션 커밋 완료")
+        return actual_data
+
+    except Exception:
+        connection.rollback()
+        print("오류로 인해 이번 트랜잭션의 변경을 롤백했습니다.")
+        raise
+
 
 # 'python db.py'를 직접 실행할때만 아래의 접속 확인 코드를 실행함
 if __name__ == "__main__":
@@ -247,7 +302,6 @@ if __name__ == "__main__":
     finally:
         connection.close()
         print("MariaDB 연결 종료")
-
 
     pg_connection = connect_postgres()
 

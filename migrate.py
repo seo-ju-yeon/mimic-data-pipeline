@@ -3,8 +3,7 @@ from db import (
     connect_mariadb,
     connect_postgres,
     read_tables,
-    save_patients,
-    save_admissions,
+    save_dataset,
 )
 
 
@@ -41,21 +40,15 @@ if __name__ == "__main__":
         type(first_admission["admittime"]).__name__,
     )
 
-    # MariaDB에서 읽은 데이터를 PostgreSQL에 저장
+    # MariaDB에서 읽은 두 테이블을 하나의 트랜잭션으로 이관
     pg_connection = connect_postgres()
 
     try:
-        save_patients(pg_connection, source_patients)
-        save_admissions(pg_connection, source_admissions)
-
-        # PostgreSQL에서 두 테이블을 다시 읽어 출발지와 비교
-        target_data = read_tables(pg_connection)
-
-        # 행 수뿐 아니라 두 테이블의 모든 행/열 값을 비교
-        if source_data != target_data:
-            raise ValueError(
-                "MariaDB와 PostgreSQL의 조회 결과가 일치하지 않습니다."
-            )
+        target_data = save_dataset(
+            pg_connection,
+            source_patients,
+            source_admissions,
+        )
 
         print("MariaDB → PostgreSQL 이관 결과 비교 통과")
         print(f"PostgreSQL 환자 수: {len(target_data['patients'])}")
